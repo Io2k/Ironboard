@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import QRCode from 'qrcode';
-import { Building2, QrCode, Copy, Check, Dumbbell } from 'lucide-react';
+import { Building2, QrCode, Copy, Check, Dumbbell, LogOut } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { makeGymCode, joinUrl, displayUrl } from '../lib/gym';
 
@@ -82,9 +82,17 @@ export default function OwnerView({ user }) {
             <p className="text-xs text-slate-400">Create your gym, share the code, fill the screen.</p>
           </div>
         </div>
-        <a href="/" className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 border border-slate-800 flex items-center gap-2">
-          <Dumbbell className="w-4 h-4" /> Member app
-        </a>
+        <div className="flex items-center gap-2">
+          <a href="/" className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 border border-slate-800 flex items-center gap-2">
+            <Dumbbell className="w-4 h-4" /> Member app
+          </a>
+          <button
+            onClick={async () => { await supabase.auth.signOut(); window.location.href = '/'; }}
+            className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 border border-slate-800 flex items-center gap-2"
+          >
+            <LogOut className="w-4 h-4" /> Sign out
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 p-6 max-w-2xl mx-auto w-full">

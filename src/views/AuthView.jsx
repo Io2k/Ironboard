@@ -70,6 +70,9 @@ export default function AuthView({ initialCode = '', initialMode = 'signin', onD
       if (!user) throw new Error('You are signed out. Sign in and try again.');
       const { error } = await supabase.from('profiles').upsert({
         id: user.id,
+        // The profiles table also has a NOT NULL username column, so the
+        // display name goes in both places.
+        username: displayName.trim(),
         display_name: displayName.trim(),
         gender,
         gym_id: gym.id,
@@ -133,6 +136,13 @@ export default function AuthView({ initialCode = '', initialMode = 'signin', onD
             {error && <p className="text-sm text-red-400">{error}</p>}
             <button type="submit" disabled={busy} className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 rounded-xl transition shadow-lg shadow-amber-500/20 disabled:opacity-50">
               {busy ? 'Saving…' : 'Join my gym'}
+            </button>
+            <button
+              type="button"
+              className="w-full text-center text-sm text-slate-400 hover:text-slate-200"
+              onClick={async () => { await supabase.auth.signOut(); window.location.href = '/'; }}
+            >
+              Sign in with a different account
             </button>
           </form>
         ) : (
