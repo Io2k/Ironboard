@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dumbbell, Trophy, Tv, Settings, LogOut, Plus, Flame, QrCode } from 'lucide-react';
+import { Dumbbell, Trophy, Tv, Settings, LogOut, Plus, Flame, QrCode, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { displayUrl } from '../lib/gym';
 
@@ -16,6 +16,12 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
   const [shareWithGym, setShareWithGym] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
+
+  // The gym owner can remove any lift in their gym (e.g. a wrong entry on the TV screen).
+  const isGymOwner = gym?.owner_id === user.id;
+  const canDelete = (w) => w.user_id === user.id || isGymOwner;
 
   const loadFeed = useCallback(async () => {
     if (!gym) return;
@@ -67,6 +73,35 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
     setReps('');
     await loadFeed();
     setSaving(false);
+  }
+
+  // Two taps: first tap arms the confirm, second tap deletes for good.
+  // The delete only succeeds if the database allows it (see migration 002:
+  // you can delete your own lifts, and a gym owner can delete any lift in
+  // their gym). If the row comes back empty, the rule isn't in place yet.
+  async function handleDeleteWorkout(w) {
+    if (confirmDeleteId !== w.id) {
+      setConfirmDeleteId(w.id);
+      return;
+    }
+    setConfirmDeleteId(null);
+    setDeletingId(w.id);
+    setError('');
+    const { data, error } = await supabase
+      .from('workouts')
+      .delete()
+      .eq('id', w.id)
+      .select('id');
+    setDeletingId(null);
+    if (error) {
+      setError('Could not delete that lift. Try again.');
+      return;
+    }
+    if (!data || data.length === 0) {
+      setError('Could not delete that lift — the delete rule has not been set up in Supabase yet (migration 002).');
+      return;
+    }
+    await loadFeed();
   }
 
   const myWorkouts = workouts.filter((w) => w.user_id === user.id);
@@ -152,20 +187,45 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
               <p className="text-slate-400 text-sm">No lifts logged yet. Log the first one and it will show up here — and on the gym screen.</p>
             ) : (
               <div className="space-y-3">
-                {workouts.filter((w) => w.share_with_gym !== false).map((w) => (
-                  <div key={w.id} className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between">
-                    <div className="flex items-center space-x-4">
-                      <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
+                {workouts
+                  // Your own lifts show here even if you kept them private,
+                  // so you can always delete one — other members only see shared lifts.
+                  .filter((w) => w.share_with_gym !== false || w.user_id === user.id)
+                  .map((w) => (
+                  <div key={w.id} className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center space-x-4 min-w-0">
+                      <div className="w-12 h-12 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
                         {w.exercise === 'Bench Press' ? 'BP' : w.exercise === 'Squats' ? 'SQ' : 'DL'}
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <h4 className="font-bold text-slate-200">{names[w.user_id] || 'Member'}</h4>
                         <p className="text-xs text-slate-400">{w.exercise} • {w.date}</p>
+                        {w.share_with_gym === false && w.user_id === user.id && (
+                          <p className="text-xs text-slate-500 mt-0.5">Private — only you can see this</p>
+                        )}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <span className="text-2xl font-extrabold text-amber-400">{w.weight} lbs</span>
-                      <p className="text-xs text-slate-400">{w.reps} {w.reps === 1 ? 'rep' : 'reps'}</p>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right">
+                        <span className="text-2xl font-extrabold text-amber-400">{w.weight} lbs</span>
+                        <p className="text-xs text-slate-400">{w.reps} {w.reps === 1 ? 'rep' : 'reps'}</p>
+                      </div>
+                      {canDelete(w) && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWorkout(w)}
+                          disabled={deletingId === w.id}
+                          title={confirmDeleteId === w.id ? 'Tap again to confirm delete' : 'Delete this lift'}
+                          className={`px-2.5 py-2 rounded-lg text-sm font-medium border flex items-center gap-1.5 disabled:opacity-50 ${
+                            confirmDeleteId === w.id
+                              ? 'bg-red-500/20 text-red-300 border-red-500/50'
+                              : 'text-slate-400 hover:text-red-300 border-slate-800 hover:border-red-500/40'
+                          }`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          {deletingId === w.id ? 'Deleting…' : confirmDeleteId === w.id ? 'Sure?' : 'Delete'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
