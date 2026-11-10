@@ -2,13 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from './lib/supabase';
 import AuthView from './views/AuthView';
 import MemberView from './views/MemberView';
+import MyGymView from './views/MyGymView';
 import OwnerView from './views/OwnerView';
 import DisplayView from './views/DisplayView';
 
 // IronBoard, split into two apps sharing one Supabase backend.
 //   /                  member app (sign in, log lifts, gym feed)
 //   /join?code=XXXX   member sign-up with a gym code filled in (QR links land here)
-//   /owner            gym owner setup: create a gym, get its code + QR
+//   /my-gym           member: switch to a gym that already exists, by code
+//   /owner            gym owner setup: create/edit a gym, get its code + QR
 //   /display/XXXX     public gym screen for the wall monitor (no sign-in)
 function parseRoute() {
   const path = window.location.pathname;
@@ -16,6 +18,7 @@ function parseRoute() {
   const displayMatch = path.match(/^\/display\/([^/]+)\/?$/);
   if (displayMatch) return { view: 'display', code: decodeURIComponent(displayMatch[1]) };
   if (path === '/join') return { view: 'auth', code: params.get('code') || '' };
+  if (path === '/my-gym') return { view: 'mygym' };
   if (path === '/owner') return { view: 'owner' };
   return { view: 'member' };
 }
@@ -68,6 +71,13 @@ export default function App() {
     if (loading) return <LoadingScreen />;
     if (!session) return <AuthView onDone={loadSession} />;
     return <OwnerView user={session.user} />;
+  }
+
+  if (route.view === 'mygym') {
+    if (loading) return <LoadingScreen />;
+    if (!session) return <AuthView onDone={loadSession} />;
+    if (!profile) return <AuthView initialMode="profile" onDone={loadSession} />;
+    return <MyGymView user={session.user} profile={profile} gym={gym} />;
   }
 
   // Member app (and /join).

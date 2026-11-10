@@ -7,6 +7,8 @@ const EXERCISES = ['Bench Press', 'Squats', 'Deadlifts'];
 // Member app: log lifts to Supabase, see your history and the gym's live feed.
 export default function MemberView({ user, profile, gym, onSignOut }) {
   const [workouts, setWorkouts] = useState([]);
+  const [myWorkouts, setMyWorkouts] = useState([]);
+  const [gymNames, setGymNames] = useState({});
   const [names, setNames] = useState({});
   const [loading, setLoading] = useState(true);
   const [exercise, setExercise] = useState('Bench Press');
@@ -44,8 +46,25 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
       (profs || []).forEach((p) => { map[p.id] = p.display_name || 'Member'; });
       setNames(map);
     }
+    // Your lifts follow you: every lift records the gym it happened at
+    // (workouts.gym_id), so load all of your lifts, not just this gym's.
+    // The gym board still only shows lifts logged at that gym.
+    const { data: mine } = await supabase
+      .from('workouts')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    setMyWorkouts(mine || []);
+    const gymIds = [...new Set((mine || []).map((w) => w.gym_id).filter(Boolean))];
+    if (gymIds.length) {
+      const { data: gyms } = await supabase.from('gyms').select('id, name').in('id', gymIds);
+      const gmap = {};
+      (gyms || []).forEach((g) => { gmap[g.id] = g.name || 'Gym'; });
+      setGymNames(gmap);
+    }
     setLoading(false);
-  }, [gym]);
+  }, [gym, user.id]);
 
   useEffect(() => { loadFeed(); }, [loadFeed]);
 
@@ -103,29 +122,82 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
     await loadFeed();
   }
 
-  const myWorkouts = workouts.filter((w) => w.user_id === user.id);
+  // One lift card, used in both the gym feed and your own history.
+  // showGym labels which gym the lift happened at (for lifts from other gyms).
+  function LiftCard({ w, showGym }) {
+    return (
+      <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 sm:p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
+          <div className="w-10 h-10 sm:w-12 sm:h-12 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
+            {w.exercise === 'Bench Press' ? 'BP' : w.exercise === 'Squats' ? 'SQ' : 'DL'}
+          </div>
+          <div className="min-w-0">
+            <h4 className="font-bold text-slate-200">{names[w.user_id] || 'Member'}</h4>
+            <p className="text-xs text-slate-400">{w.exercise} • {w.date}</p>
+            {showGym && gymNames[w.gym_id] && (
+              <p className="text-xs text-slate-500 mt-0.5">{gymNames[w.gym_id]}</p>
+            )}
+            {w.share_with_gym === false && w.user_id === user.id && (
+              <p className="text-xs text-slate-500 mt-0.5">Private — only you can see this</p>
+            )}
+          </div>
+        </div>
+        {/* Weight and reps sit above the Delete button, stacked
+            vertically, so the row isn't squeezed side-by-side on a phone. */}
+        <div className="flex flex-col items-end gap-2 shrink-0">
+          <div className="text-right">
+            <span className="text-xl sm:text-2xl font-extrabold text-amber-400 whitespace-nowrap">{w.weight} lbs</span>
+            <p className="text-xs text-slate-400">{w.reps} {w.reps === 1 ? 'rep' : 'reps'}</p>
+          </div>
+          {canDelete(w) && (
+            <button
+              type="button"
+              onClick={() => handleDeleteWorkout(w)}
+              disabled={deletingId === w.id}
+              title={confirmDeleteId === w.id ? 'Tap again to confirm delete' : 'Delete this lift'}
+              className={`px-2.5 py-2 rounded-lg text-sm font-medium border flex items-center gap-1.5 disabled:opacity-50 ${
+                confirmDeleteId === w.id
+                  ? 'bg-red-500/20 text-red-300 border-red-500/50'
+                  : 'text-slate-400 hover:text-red-300 border-slate-800 hover:border-red-500/40'
+              }`}
+            >
+              <Trash2 className="w-4 h-4" />
+              {deletingId === w.id ? 'Deleting…' : confirmDeleteId === w.id ? 'Sure?' : 'Delete'}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-            <Dumbbell className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="font-bold text-lg tracking-wide flex items-center gap-2">
-              {gym?.name || 'IronBoard'} <span className="text-xs px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">IronBoard</span>
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-4">
+        <div className="max-w-7xl mx-auto w-full">
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="font-black text-2xl sm:text-3xl tracking-wide leading-tight min-w-0">
+              {gym?.name || 'IronBoard'}
             </h1>
-            <p className="text-xs text-slate-400">{profile?.display_name || user.email} • Member Tracker</p>
+            <div className="flex items-center gap-2 shrink-0">
+              <a href="/my-gym" className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-slate-100 flex items-center gap-2 border border-slate-800">
+                <Settings className="w-4 h-4" /> My gym
+              </a>
+              <button onClick={onSignOut} className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-slate-100 flex items-center gap-2 border border-slate-800">
+                <LogOut className="w-4 h-4" /> Sign out
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <a href="/owner" className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-slate-100 flex items-center gap-2 border border-slate-800">
-            <Settings className="w-4 h-4" /> My gym
-          </a>
-          <button onClick={onSignOut} className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-slate-100 flex items-center gap-2 border border-slate-800">
-            <LogOut className="w-4 h-4" /> Sign out
-          </button>
+          <div className="flex items-center gap-3 mt-3">
+            {gym?.logo_url ? (
+              <img src={gym.logo_url} alt={`${gym.name || 'Gym'} logo`} className="w-10 h-10 rounded-lg object-cover border border-amber-500/50" />
+            ) : (
+              <div className="w-10 h-10 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                <Dumbbell className="w-6 h-6" />
+              </div>
+            )}
+            <span className="font-bold text-lg tracking-wide">IronBoard</span>
+          </div>
+          <p className="text-xs text-slate-400 mt-2">{profile?.display_name || user.email} • Member Tracker</p>
         </div>
       </header>
 
@@ -174,7 +246,7 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
 
           <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-amber-500" /> Recent Gym PR Feed
+              <Trophy className="w-5 h-5 text-amber-500" /> At {gym?.name || 'your gym'}
             </h2>
             {loading ? (
               <p className="text-slate-400 text-sm">Loading lifts…</p>
@@ -186,52 +258,26 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
                   // Your own lifts show here even if you kept them private,
                   // so you can always delete one — other members only see shared lifts.
                   .filter((w) => w.share_with_gym !== false || w.user_id === user.id)
-                  .map((w) => (
-                  <div key={w.id} className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 sm:p-4 flex items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
-                      <div className="w-10 h-10 sm:w-12 sm:h-12 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
-                        {w.exercise === 'Bench Press' ? 'BP' : w.exercise === 'Squats' ? 'SQ' : 'DL'}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-bold text-slate-200">{names[w.user_id] || 'Member'}</h4>
-                        <p className="text-xs text-slate-400">{w.exercise} • {w.date}</p>
-                        {w.share_with_gym === false && w.user_id === user.id && (
-                          <p className="text-xs text-slate-500 mt-0.5">Private — only you can see this</p>
-                        )}
-                      </div>
-                    </div>
-                    {/* Weight and reps sit above the Delete button, stacked
-                        vertically, so the row isn't squeezed side-by-side on a phone. */}
-                    <div className="flex flex-col items-end gap-2 shrink-0">
-                      <div className="text-right">
-                        <span className="text-xl sm:text-2xl font-extrabold text-amber-400 whitespace-nowrap">{w.weight} lbs</span>
-                        <p className="text-xs text-slate-400">{w.reps} {w.reps === 1 ? 'rep' : 'reps'}</p>
-                      </div>
-                      {canDelete(w) && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteWorkout(w)}
-                          disabled={deletingId === w.id}
-                          title={confirmDeleteId === w.id ? 'Tap again to confirm delete' : 'Delete this lift'}
-                          className={`px-2.5 py-2 rounded-lg text-sm font-medium border flex items-center gap-1.5 disabled:opacity-50 ${
-                            confirmDeleteId === w.id
-                              ? 'bg-red-500/20 text-red-300 border-red-500/50'
-                              : 'text-slate-400 hover:text-red-300 border-slate-800 hover:border-red-500/40'
-                          }`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          {deletingId === w.id ? 'Deleting…' : confirmDeleteId === w.id ? 'Sure?' : 'Delete'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  .map((w) => <LiftCard key={w.id} w={w} showGym={false} />)}
               </div>
             )}
-            {myWorkouts.length > 0 && (
-              <p className="text-xs text-slate-500 mt-4">Your lifts in this feed: {myWorkouts.length}</p>
-            )}
           </div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mt-8">
+          <h2 className="text-xl font-bold mb-1 flex items-center gap-2">
+            <Dumbbell className="w-5 h-5 text-amber-500" /> My lifts
+          </h2>
+          <p className="text-xs text-slate-400 mb-4">Your lifts from all your gyms — they stay with you if you switch gyms. Only lifts logged at a gym show on that gym&apos;s board.</p>
+          {loading ? (
+            <p className="text-slate-400 text-sm">Loading lifts…</p>
+          ) : myWorkouts.length === 0 ? (
+            <p className="text-slate-400 text-sm">No lifts logged yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {myWorkouts.map((w) => <LiftCard key={w.id} w={w} showGym />)}
+            </div>
+          )}
         </div>
       </main>
     </div>

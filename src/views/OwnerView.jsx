@@ -11,16 +11,37 @@ export default function OwnerView({ user }) {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [pendingLogoFile, setPendingLogoFile] = useState(null);
   const [primaryColor, setPrimaryColor] = useState('#f59e0b');
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  // Edit form (shown once the gym exists).
+  const [editName, setEditName] = useState('');
+  const [editLogoUrl, setEditLogoUrl] = useState('');
+  const [editColor, setEditColor] = useState('#f59e0b');
+  const [editBusy, setEditBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [editMessage, setEditMessage] = useState('');
+
+  // Upload a logo file to the public gym-logos bucket and return its URL.
+  // Needs migration 003 run in Supabase (bucket + policies) or this fails.
+  async function uploadLogoFile(file, folder) {
+    const clean = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+    const path = `${folder}/${Date.now()}-${clean}`;
+    const { error: uploadError } = await supabase.storage.from('gym-logos').upload(path, file);
+    if (uploadError) throw uploadError;
+    return supabase.storage.from('gym-logos').getPublicUrl(path).data.publicUrl;
+  }
 
   const loadGym = useCallback(async () => {
     const { data } = await supabase.from('gyms').select('*').eq('owner_id', user.id).maybeSingle();
     setGym(data || null);
     if (data) {
+      setEditName(data.name || '');
+      setEditLogoUrl(data.logo_url || '');
+      setEditColor(data.primary_color || '#f59e0b');
       const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('gym_id', data.id);
       setMemberCount(count || 0);
       QRCode.toDataURL(joinUrl(data.code), { width: 512, margin: 2 }).then(setQrDataUrl).catch(() => {});
@@ -34,13 +55,25 @@ export default function OwnerView({ user }) {
     e.preventDefault();
     setBusy(true);
     setError('');
+    // If the owner picked a logo file, upload it first so the gym is
+    // created with its public URL. A URL pasted below works without this.
+    let finalLogoUrl = logoUrl.trim() || null;
+    if (pendingLogoFile) {
+      try {
+        finalLogoUrl = await uploadLogoFile(pendingLogoFile, `pending/${user.id}`);
+      } catch {
+        setError('Logo upload failed — the gym-logos storage bucket may not be set up yet (run migration 003 in Supabase), or try pasting an image URL instead.');
+        setBusy(false);
+        return;
+      }
+    }
     try {
       let code = makeGymCode(name);
       // Retry with a fresh code if the generated one is somehow taken.
       for (let attempt = 0; attempt < 3; attempt++) {
         const { error } = await supabase.from('gyms').insert({
           name: name.trim(),
-          logo_url: logoUrl.trim() || null,
+          logo_url: finalLogoUrl,
           primary_color: primaryColor,
           code,
           owner_id: user.id,
@@ -54,6 +87,45 @@ export default function OwnerView({ user }) {
       setError(err.message || 'Could not create your gym. Try again.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleSaveEdit(e) {
+    e.preventDefault();
+    if (!gym) return;
+    setEditBusy(true);
+    setEditMessage('');
+    setError('');
+    const { error } = await supabase
+      .from('gyms')
+      .update({
+        name: editName.trim(),
+        logo_url: editLogoUrl.trim() || null,
+        primary_color: editColor,
+      })
+      .eq('id', gym.id);
+    setEditBusy(false);
+    if (error) {
+      setError('Could not save those changes. Try again.');
+      return;
+    }
+    setEditMessage('Saved — your gym name, logo and colour are updated everywhere.');
+    await loadGym();
+  }
+
+  async function handleEditLogoUpload(file) {
+    if (!file || !gym) return;
+    setUploading(true);
+    setError('');
+    setEditMessage('');
+    try {
+      const url = await uploadLogoFile(file, gym.id);
+      setEditLogoUrl(url);
+      setEditMessage('Logo uploaded — tap Save changes to use it.');
+    } catch {
+      setError('Logo upload failed — the gym-logos storage bucket may not be set up yet (run migration 003 in Supabase), or paste an image URL instead.');
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -105,6 +177,13 @@ export default function OwnerView({ user }) {
               <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. REPS Gym" required />
             </div>
             <div>
+              <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Logo — upload a file</label>
+              <input type="file" accept="image/*" onChange={(e) => setPendingLogoFile(e.target.files?.[0] || null)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-amber-500 file:text-slate-950 file:font-semibold" />
+              {pendingLogoFile && <p className="text-xs text-slate-400 mt-1">Selected: {pendingLogoFile.name}</p>}
+              <p className="text-xs text-slate-500 mt-1">Or paste an image URL below instead. Upload needs the gym-logos storage bucket (migration 003).</p>
+            </div>
+            <div>
               <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Logo image URL (optional)</label>
               <input className={inputCls} value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://example.com/logo.png" />
             </div>
@@ -123,6 +202,40 @@ export default function OwnerView({ user }) {
               <h2 className="text-2xl font-bold">{gym.name}</h2>
               <p className="text-sm text-slate-400">{memberCount} member{memberCount === 1 ? '' : 's'} joined</p>
             </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4 pt-4 border-t border-slate-800">
+              <h3 className="text-lg font-bold">Edit your gym</h3>
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Gym name</label>
+                <input className={inputCls} value={editName} onChange={(e) => setEditName(e.target.value)} required />
+              </div>
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Logo — upload a file</label>
+                <input type="file" accept="image/*" onChange={(e) => handleEditLogoUpload(e.target.files?.[0])}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-amber-500 file:text-slate-950 file:font-semibold" />
+                <p className="text-xs text-slate-500 mt-1">Upload needs the gym-logos storage bucket (migration 003). Or paste an image URL below instead.</p>
+              </div>
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Logo image URL</label>
+                <input className={inputCls} value={editLogoUrl} onChange={(e) => setEditLogoUrl(e.target.value)} placeholder="https://example.com/logo.png" />
+              </div>
+              {editLogoUrl && (
+                <div className="flex items-center gap-3">
+                  <img src={editLogoUrl} alt="Gym logo preview" className="w-12 h-12 rounded-lg object-cover border border-amber-500/50" />
+                  <p className="text-xs text-slate-400">This logo replaces the dumbbell icon in the member app and on the gym screen.</p>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs uppercase tracking-wider text-slate-400 mb-1 font-semibold">Accent color</label>
+                <input type="color" value={editColor} onChange={(e) => setEditColor(e.target.value)} className="w-16 h-10 bg-slate-950 border border-slate-800 rounded-lg cursor-pointer" />
+              </div>
+              {error && <p className="text-sm text-red-400">{error}</p>}
+              {editMessage && <p className="text-sm text-emerald-400">{editMessage}</p>}
+              <button type="submit" disabled={editBusy || uploading} className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 rounded-xl transition shadow-lg shadow-amber-500/20 disabled:opacity-50">
+                {uploading ? 'Uploading logo…' : editBusy ? 'Saving…' : 'Save changes'}
+              </button>
+            </form>
+
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 text-center">
               <p className="text-xs uppercase tracking-widest text-slate-400 mb-1">Gym code</p>
               <p className="text-4xl font-black tracking-widest text-amber-400">{gym.code}</p>
