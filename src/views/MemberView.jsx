@@ -187,9 +187,9 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
                   // so you can always delete one — other members only see shared lifts.
                   .filter((w) => w.share_with_gym !== false || w.user_id === user.id)
                   .map((w) => (
-                  <div key={w.id} className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 flex items-center justify-between gap-3">
-                    <div className="flex items-center space-x-4 min-w-0">
-                      <div className="w-12 h-12 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
+                  <div key={w.id} className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 sm:p-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
                         {w.exercise === 'Bench Press' ? 'BP' : w.exercise === 'Squats' ? 'SQ' : 'DL'}
                       </div>
                       <div className="min-w-0">
@@ -200,9 +200,11 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
+                    {/* Weight and reps sit above the Delete button, stacked
+                        vertically, so the row isn't squeezed side-by-side on a phone. */}
+                    <div className="flex flex-col items-end gap-2 shrink-0">
                       <div className="text-right">
-                        <span className="text-2xl font-extrabold text-amber-400">{w.weight} lbs</span>
+                        <span className="text-xl sm:text-2xl font-extrabold text-amber-400 whitespace-nowrap">{w.weight} lbs</span>
                         <p className="text-xs text-slate-400">{w.reps} {w.reps === 1 ? 'rep' : 'reps'}</p>
                       </div>
                       {canDelete(w) && (
