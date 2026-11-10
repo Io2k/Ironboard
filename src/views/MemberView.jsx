@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dumbbell, Trophy, Tv, Settings, LogOut, Plus, Flame, QrCode, Trash2 } from 'lucide-react';
+import { Dumbbell, Trophy, Settings, LogOut, Plus, Flame, QrCode, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { displayUrl } from '../lib/gym';
 
 const EXERCISES = ['Bench Press', 'Squats', 'Deadlifts'];
 
@@ -121,10 +120,6 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <a href={gym ? displayUrl(gym.code) : '/'} target="_blank" rel="noreferrer"
-            className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-slate-100 flex items-center gap-2 border border-slate-800">
-            <Tv className="w-4 h-4" /> Gym screen
-          </a>
           <a href="/owner" className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-slate-100 flex items-center gap-2 border border-slate-800">
             <Settings className="w-4 h-4" /> My gym
           </a>
