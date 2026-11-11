@@ -107,7 +107,8 @@ export default function DisplayView({ code }) {
   const giveawayAd = gym?.giveaway_enabled
     ? {
         id: 'giveaway',
-        title: `Monthly Giveaway${gym.giveaway_prize ? ` — ${gym.giveaway_prize}` : ''}`,
+        title: 'Monthly Giveaway',
+        prize: gym.giveaway_prize || null,
         description: 'Log a lift today and you’re automatically entered to win. One entry per day, drawn at the end of the month.',
         image_url: null,
       }
@@ -240,7 +241,17 @@ export default function DisplayView({ code }) {
           </div>
         )}
 
-        {screen === 'ad' && ad && (
+        {screen === 'ad' && ad && ad.id === 'giveaway' && (
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+            <Gift className="w-16 h-16 text-amber-400" />
+            <span className="text-xs px-3 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase font-bold tracking-widest">Monthly Giveaway</span>
+            <h3 className="text-2xl font-bold text-slate-400 uppercase tracking-widest">This month&apos;s prize</h3>
+            <p className="text-4xl font-black text-amber-400 leading-tight">{ad.prize || 'Prize to be announced'}</p>
+            <p className="text-lg text-slate-300 leading-relaxed max-w-2xl">{ad.description}</p>
+          </div>
+        )}
+
+        {screen === 'ad' && ad && ad.id !== 'giveaway' && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 flex flex-col md:flex-row items-center gap-8">
             {ad.image_url ? (
               <img src={ad.image_url} alt={ad.title} className="w-full md:w-1/2 h-72 rounded-xl object-cover border border-slate-800 shadow-xl" />
@@ -250,12 +261,10 @@ export default function DisplayView({ code }) {
               </div>
             )}
             <div className="flex-1 space-y-4">
-              <span className="text-xs px-3 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase font-bold tracking-widest">
-                {ad.id === 'giveaway' ? 'Monthly Giveaway' : 'Local Community Sponsor'}
-              </span>
+              <span className="text-xs px-3 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase font-bold tracking-widest">Local Community Sponsor</span>
               <h3 className="text-3xl font-black text-slate-100">{ad.title}</h3>
               <p className="text-lg text-slate-300 leading-relaxed">{ad.description}</p>
-              {ad.id !== 'giveaway' && <p className="text-xs text-slate-500 pt-2">Support local businesses that support {gym.name}!</p>}
+              <p className="text-xs text-slate-500 pt-2">Support local businesses that support {gym.name}!</p>
             </div>
           </div>
         )}
@@ -277,6 +286,7 @@ export default function DisplayView({ code }) {
           {screen === 'live' ? 'Live feed'
             : screen === 'best' ? 'Best lifts'
             : screen === 'winner' ? `Giveaway winner: ${winnerName}`
+            : ad?.id === 'giveaway' ? 'Monthly Giveaway'
             : ad ? `Sponsor: ${ad.title}` : 'Live feed'}
         </span>
       </footer>
