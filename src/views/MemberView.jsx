@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dumbbell, Trophy, Settings, LogOut, Plus, Flame, QrCode, Trash2 } from 'lucide-react';
+import { Dumbbell, Trophy, Settings, LogOut, Plus, Flame, QrCode, Trash2, Gift } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { monthKey, todayKey } from '../lib/admin';
 
 const EXERCISES = ['Bench Press', 'Squats', 'Deadlifts'];
 
@@ -19,6 +20,9 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
   const [error, setError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  // Monthly giveaway: 1 entry per day you log a lift, only while the gym
+  // has it switched on (gyms.giveaway_enabled, migration 004).
+  const [enteredToday, setEnteredToday] = useState(false);
 
   // The gym owner can remove any lift in their gym (e.g. a wrong entry on the TV screen).
   const isGymOwner = gym?.owner_id === user.id;
@@ -68,6 +72,23 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
 
   useEffect(() => { loadFeed(); }, [loadFeed]);
 
+  // Are you already entered in today's giveaway draw?
+  useEffect(() => {
+    if (!gym?.giveaway_enabled) {
+      setEnteredToday(false);
+      return;
+    }
+    supabase
+      .from('giveaway_entries')
+      .select('id')
+      .eq('gym_id', gym.id)
+      .eq('user_id', user.id)
+      .eq('entry_date', todayKey())
+      .maybeSingle()
+      .then(({ data }) => setEnteredToday(!!data))
+      .catch(() => {});
+  }, [gym, user.id]);
+
   async function handleAddWorkout(e) {
     e.preventDefault();
     if (!weight || !reps) return;
@@ -86,6 +107,17 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
       setError('Could not save that lift. Try again.');
       setSaving(false);
       return;
+    }
+    // Giveaway entry: one per day. The database's unique rule ignores a
+    // second entry the same day, so logging twice never double-enters you.
+    if (gym?.giveaway_enabled) {
+      const { error: entryError } = await supabase
+        .from('giveaway_entries')
+        .upsert(
+          { gym_id: gym.id, user_id: user.id, entry_date: todayKey() },
+          { onConflict: 'gym_id,user_id,entry_date', ignoreDuplicates: true }
+        );
+      if (!entryError) setEnteredToday(true);
     }
     setWeight('');
     setReps('');
@@ -240,6 +272,22 @@ export default function MemberView({ user, profile, gym, onSignOut }) {
               <div className="mt-6 pt-4 border-t border-slate-800 text-xs text-slate-400 flex items-center gap-2">
                 <QrCode className="w-4 h-4 text-amber-400" />
                 Gym code <span className="font-bold text-slate-200">{gym.code}</span> — share it to invite members.
+              </div>
+            )}
+            {gym?.giveaway_enabled && (
+              <div className="mt-6 pt-4 border-t border-slate-800">
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3">
+                  <Gift className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-slate-100">Monthly giveaway — {monthKey()}</p>
+                    {gym.giveaway_prize && <p className="text-sm text-slate-300 mt-0.5">This month&apos;s prize: {gym.giveaway_prize}</p>}
+                    <p className="text-xs text-slate-400 mt-1">
+                      {enteredToday
+                        ? 'You’re entered for this month — log a lift again tomorrow for another entry.'
+                        : 'Log a lift today and you’re automatically entered (1 entry per day).'}
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </div>

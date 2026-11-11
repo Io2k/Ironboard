@@ -4,6 +4,7 @@ import AuthView from './views/AuthView';
 import MemberView from './views/MemberView';
 import MyGymView from './views/MyGymView';
 import OwnerView from './views/OwnerView';
+import AdminView from './views/AdminView';
 import DisplayView from './views/DisplayView';
 
 // IronBoard, split into two apps sharing one Supabase backend.
@@ -11,6 +12,7 @@ import DisplayView from './views/DisplayView';
 //   /join?code=XXXX   member sign-up with a gym code filled in (QR links land here)
 //   /my-gym           member: switch to a gym that already exists, by code
 //   /owner            gym owner setup: create/edit a gym, get its code + QR
+//   /admin            Ian's console: all gyms, stats, board ads, giveaways
 //   /display/XXXX     public gym screen for the wall monitor (no sign-in)
 function parseRoute() {
   const path = window.location.pathname;
@@ -20,6 +22,7 @@ function parseRoute() {
   if (path === '/join') return { view: 'auth', code: params.get('code') || '' };
   if (path === '/my-gym') return { view: 'mygym' };
   if (path === '/owner') return { view: 'owner' };
+  if (path === '/admin') return { view: 'admin' };
   return { view: 'member' };
 }
 
@@ -71,6 +74,12 @@ export default function App() {
     if (loading) return <LoadingScreen />;
     if (!session) return <AuthView onDone={loadSession} />;
     return <OwnerView user={session.user} />;
+  }
+
+  if (route.view === 'admin') {
+    if (loading) return <LoadingScreen />;
+    if (!session) return <AuthView onDone={loadSession} />;
+    return <AdminView user={session.user} />;
   }
 
   if (route.view === 'mygym') {

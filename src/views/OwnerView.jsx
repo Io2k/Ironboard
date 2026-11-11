@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import QRCode from 'qrcode';
-import { Building2, QrCode, Copy, Check, Dumbbell, LogOut } from 'lucide-react';
+import { Building2, QrCode, Copy, Check, Dumbbell, LogOut, BarChart3, Gift, Megaphone } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { makeGymCode, joinUrl, displayUrl } from '../lib/gym';
+import GymStatsPanel from './GymStatsPanel';
+import GiveawayPanel from './GiveawayPanel';
 
 // Gym owner flow: create a gym, get its join code + QR poster link.
 export default function OwnerView({ user }) {
@@ -24,6 +26,8 @@ export default function OwnerView({ user }) {
   const [editBusy, setEditBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [editMessage, setEditMessage] = useState('');
+  // Board ads for this gym (managed by the IronBoard admin; owners can see them here).
+  const [ads, setAds] = useState([]);
 
   // Upload a logo file to the public gym-logos bucket and return its URL.
   // Needs migration 003 run in Supabase (bucket + policies) or this fails.
@@ -44,6 +48,8 @@ export default function OwnerView({ user }) {
       setEditColor(data.primary_color || '#f59e0b');
       const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('gym_id', data.id);
       setMemberCount(count || 0);
+      const { data: adRows } = await supabase.from('ads').select('*').eq('gym_id', data.id).order('created_at', { ascending: false });
+      setAds(adRows || []);
       QRCode.toDataURL(joinUrl(data.code), { width: 512, margin: 2 }).then(setQrDataUrl).catch(() => {});
     }
     setLoading(false);
@@ -167,7 +173,7 @@ export default function OwnerView({ user }) {
         </div>
       </header>
 
-      <main className="flex-1 p-6 max-w-2xl mx-auto w-full">
+      <main className="flex-1 p-6 max-w-4xl mx-auto w-full">
         {!gym ? (
           <form onSubmit={handleCreate} className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-xl space-y-4">
             <h2 className="text-2xl font-bold">Set up your gym</h2>
@@ -197,6 +203,7 @@ export default function OwnerView({ user }) {
             </button>
           </form>
         ) : (
+          <>
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-xl space-y-6">
             <div>
               <h2 className="text-2xl font-bold">{gym.name}</h2>
@@ -263,6 +270,51 @@ export default function OwnerView({ user }) {
               </a>
             </div>
           </div>
+
+          <div className="space-y-6 mt-6">
+            <section>
+              <h2 className="text-xl font-bold mb-3 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-amber-500" /> Your gym&apos;s stats
+              </h2>
+              <p className="text-xs text-slate-400 mb-3">These are the numbers local advertisers see — members, activity, and lifts logged. No member names or emails are ever shared with advertisers.</p>
+              <GymStatsPanel gym={gym} />
+            </section>
+
+            <section>
+              <h2 className="text-xl font-bold mb-3 flex items-center gap-2">
+                <Gift className="w-5 h-5 text-amber-500" /> Monthly giveaway
+              </h2>
+              <GiveawayPanel gym={gym} user={user} onGymUpdated={loadGym} />
+            </section>
+
+            <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+              <h2 className="text-xl font-bold mb-1 flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-amber-500" /> Ads on your board ({ads.length})
+              </h2>
+              <p className="text-xs text-slate-400 mb-4">Ads are added by the IronBoard admin. Want a local business on your board? Tell Ian and he&apos;ll add it.</p>
+              {ads.length === 0 ? (
+                <p className="text-sm text-slate-400">No ads on your board yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {ads.map((ad) => (
+                    <div key={ad.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex gap-4 items-start">
+                      {ad.image_url ? (
+                        <img src={ad.image_url} alt={ad.title} className="w-20 h-20 rounded-lg object-cover border border-slate-800 shrink-0" />
+                      ) : (
+                        <div className="w-20 h-20 rounded-lg bg-slate-800 border border-slate-700 shrink-0 flex items-center justify-center text-slate-500 text-xs">No image</div>
+                      )}
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-slate-100">{ad.title}</h4>
+                        {ad.description && <p className="text-sm text-slate-400 mt-0.5">{ad.description}</p>}
+                        <p className="text-xs text-slate-500 mt-1">Added {ad.created_at?.split('T')[0]}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+          </>
         )}
       </main>
     </div>

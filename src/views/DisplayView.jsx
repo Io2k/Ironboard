@@ -1,15 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Dumbbell, Play, Pause } from 'lucide-react';
+import { Dumbbell, Play, Pause, Gift, Trophy } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getGymByCode } from '../lib/gym';
+import { monthKey } from '../lib/admin';
 
 const EXERCISES = ['Bench Press', 'Squats', 'Deadlifts'];
-
-// Sponsor ads shown on rotation. Owners will be able to edit these later.
-const DEFAULT_ADS = [
-  { id: 1, title: 'Apex Meal Prep', description: 'Fresh macro-counted meals delivered directly to your gym weekly.', image_url: 'https://images.unsplash.com/photo-1543339308-43e59d6b73a6?auto=format&fit=crop&w=800&q=80' },
-  { id: 2, title: 'Eunice Physical Therapy & Sports Rehab', description: 'Get back under the bar faster. Zero wait times for local lifters.', image_url: 'https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?auto=format&fit=crop&w=800&q=80' },
-];
 
 // Public gym screen: no sign-in. Lives at /display/<GYM-CODE>.
 // Rotates between the live lift feed, best lifts per category (male / female),
@@ -19,7 +14,13 @@ export default function DisplayView({ code }) {
   const [notFound, setNotFound] = useState(false);
   const [workouts, setWorkouts] = useState([]);
   const [profiles, setProfiles] = useState({});
-  const [screen, setScreen] = useState('live'); // 'live' | 'best' | 'ad'
+  // Board ads come from the `ads` table (managed in the admin console).
+  // While the giveaway is on, a giveaway ad joins the rotation automatically.
+  // If a gym has no ads, the sponsor screen is skipped entirely.
+  const [dbAds, setDbAds] = useState([]);
+  const [winner, setWinner] = useState(null);
+  const [winnerName, setWinnerName] = useState('');
+  const [screenIdx, setScreenIdx] = useState(0);
   const [adIndex, setAdIndex] = useState(0);
   const [paused, setPaused] = useState(false);
 
@@ -59,21 +60,56 @@ export default function DisplayView({ code }) {
     return () => clearInterval(t);
   }, [loadWorkouts]);
 
+  // Board ads + this month's giveaway winner. Errors are ignored on purpose:
+  // before migration 004 is run these tables don't exist yet, and the board
+  // should still show lifts instead of failing.
+  const loadBoardExtras = useCallback(async () => {
+    if (!gym) return;
+    const { data: adRows, error: adError } = await supabase
+      .from('ads').select('*').eq('gym_id', gym.id).order('created_at');
+    if (!adError) setDbAds(adRows || []);
+    const { data: win, error: winError } = await supabase
+      .from('giveaway_winners').select('*').eq('gym_id', gym.id).eq('month', monthKey())
+      .order('drawn_at', { ascending: false }).limit(1).maybeSingle();
+    if (!winError && win) {
+      setWinner(win);
+      const { data: prof } = await supabase.from('profiles').select('display_name').eq('id', win.user_id).maybeSingle();
+      setWinnerName(prof?.display_name || 'Member');
+    } else {
+      setWinner(null);
+    }
+  }, [gym]);
+
+  useEffect(() => {
+    loadBoardExtras();
+    const t = setInterval(loadBoardExtras, 60000);
+    return () => clearInterval(t);
+  }, [loadBoardExtras]);
+
+  const giveawayAd = gym?.giveaway_enabled
+    ? {
+        id: 'giveaway',
+        title: `Monthly Giveaway${gym.giveaway_prize ? ` — ${gym.giveaway_prize}` : ''}`,
+        description: 'Log a lift today and you’re automatically entered to win. One entry per day, drawn at the end of the month.',
+        image_url: null,
+      }
+    : null;
+  const allAds = [...dbAds, ...(giveawayAd ? [giveawayAd] : [])];
+  // Rotation: live feed, best lifts, then a sponsor ad if there is one,
+  // then the giveaway winner if one was drawn this month.
+  const screens = ['live', 'best', ...(allAds.length ? ['ad'] : []), ...(winner ? ['winner'] : [])];
+  const screen = screens[screenIdx % screens.length];
+  const ad = allAds.length ? allAds[adIndex % allAds.length] : null;
+
   // Rotate screens every 12 seconds unless paused.
   useEffect(() => {
     if (paused) return;
     const t = setInterval(() => {
-      setScreen((prev) => {
-        if (prev === 'live') return 'best';
-        if (prev === 'best') {
-          setAdIndex((i) => (i + 1) % DEFAULT_ADS.length);
-          return 'ad';
-        }
-        return 'live';
-      });
+      setScreenIdx((i) => (i + 1) % screens.length);
+      setAdIndex((a) => (a + 1) % Math.max(1, allAds.length));
     }, 12000);
     return () => clearInterval(t);
-  }, [paused]);
+  }, [paused, screens.length, allAds.length]);
 
   function bestLift(exercise, gender) {
     const lifts = workouts.filter((w) => {
@@ -102,8 +138,6 @@ export default function DisplayView({ code }) {
   if (!gym) {
     return <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center font-sans"><p className="text-slate-400">Loading the gym screen…</p></div>;
   }
-
-  const ad = DEFAULT_ADS[adIndex];
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -186,22 +220,45 @@ export default function DisplayView({ code }) {
           </div>
         )}
 
-        {screen === 'ad' && (
+        {screen === 'ad' && ad && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 flex flex-col md:flex-row items-center gap-8">
-            <img src={ad.image_url} alt={ad.title} className="w-full md:w-1/2 h-72 rounded-xl object-cover border border-slate-800 shadow-xl" />
+            {ad.image_url ? (
+              <img src={ad.image_url} alt={ad.title} className="w-full md:w-1/2 h-72 rounded-xl object-cover border border-slate-800 shadow-xl" />
+            ) : (
+              <div className="w-full md:w-1/2 h-72 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
+                <Gift className="w-20 h-20 text-amber-400" />
+              </div>
+            )}
             <div className="flex-1 space-y-4">
-              <span className="text-xs px-3 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase font-bold tracking-widest">Local Community Sponsor</span>
+              <span className="text-xs px-3 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase font-bold tracking-widest">
+                {ad.id === 'giveaway' ? 'Monthly Giveaway' : 'Local Community Sponsor'}
+              </span>
               <h3 className="text-3xl font-black text-slate-100">{ad.title}</h3>
               <p className="text-lg text-slate-300 leading-relaxed">{ad.description}</p>
-              <p className="text-xs text-slate-500 pt-2">Support local businesses that support {gym.name}!</p>
+              {ad.id !== 'giveaway' && <p className="text-xs text-slate-500 pt-2">Support local businesses that support {gym.name}!</p>}
             </div>
+          </div>
+        )}
+
+        {screen === 'winner' && winner && (
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-8 flex flex-col items-center gap-4 text-center">
+            <Trophy className="w-16 h-16 text-amber-400" />
+            <span className="text-xs px-3 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 uppercase font-bold tracking-widest">Monthly Giveaway Winner — {winner.month}</span>
+            <h3 className="text-4xl font-black text-slate-100">{winnerName}</h3>
+            {winner.prize && <p className="text-xl text-slate-300">Won: {winner.prize}</p>}
+            <p className="text-sm text-slate-400">Log a lift to enter next month&apos;s draw.</p>
           </div>
         )}
       </main>
 
       <footer className="border-t border-slate-800 px-6 py-3 flex items-center justify-between text-xs text-slate-400">
         <span>{gym.name} • IronBoard Kiosk</span>
-        <span>{screen === 'live' ? 'Live feed' : screen === 'best' ? 'Best lifts' : `Sponsor: ${ad.title}`}</span>
+        <span>
+          {screen === 'live' ? 'Live feed'
+            : screen === 'best' ? 'Best lifts'
+            : screen === 'winner' ? `Giveaway winner: ${winnerName}`
+            : ad ? `Sponsor: ${ad.title}` : 'Live feed'}
+        </span>
       </footer>
     </div>
   );
