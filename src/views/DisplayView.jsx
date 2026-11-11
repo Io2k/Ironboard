@@ -34,6 +34,24 @@ export default function DisplayView({ code }) {
     return () => { cancelled = true; };
   }, [code]);
 
+  // Re-read the gym row every 30 seconds. Without this, the board only knew
+  // the gym's settings from when the page first loaded — switching the
+  // giveaway on (or changing its prize) in the admin console would never
+  // show up until someone refreshed the page by hand.
+  useEffect(() => {
+    const t = setInterval(() => {
+      getGymByCode(code).then((g) => {
+        if (!g) return;
+        setGym((prev) => {
+          if (!prev) return g;
+          const keys = ['name', 'logo_url', 'primary_color', 'giveaway_enabled', 'giveaway_prize'];
+          return keys.some((k) => prev[k] !== g[k]) ? g : prev;
+        });
+      }).catch(() => {});
+    }, 30000);
+    return () => clearInterval(t);
+  }, [code]);
+
   const loadWorkouts = useCallback(async () => {
     if (!gym) return;
     const { data } = await supabase
@@ -94,7 +112,9 @@ export default function DisplayView({ code }) {
         image_url: null,
       }
     : null;
-  const allAds = [...dbAds, ...(giveawayAd ? [giveawayAd] : [])];
+  // The giveaway ad goes first in the rotation so it shows on the first ad
+  // slot, ahead of the sponsor ads.
+  const allAds = [...(giveawayAd ? [giveawayAd] : []), ...dbAds];
   // Rotation: live feed, best lifts, then a sponsor ad if there is one,
   // then the giveaway winner if one was drawn this month.
   const screens = ['live', 'best', ...(allAds.length ? ['ad'] : []), ...(winner ? ['winner'] : [])];
