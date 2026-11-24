@@ -51,12 +51,32 @@ export default function MusicPanel({ gym, user, onGymUpdated }) {
   const [nowPlaying, setNowPlaying] = useState(null);
   const [volume, setVolume] = useState(80);
   const pollRef = useRef(null);
+  // True when migration 005 hasn't been run yet, so the music columns
+  // don't exist and nothing can save. The panel says so plainly instead
+  // of failing on the first save.
+  const [migrationMissing, setMigrationMissing] = useState(false);
+
+  // Probe once: if the music columns aren't there, flag it.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.from('gyms').select('music_source').eq('id', gym.id).maybeSingle().then(({ error }) => {
+      if (!cancelled && error && (error.code === 'PGRST204' || /column|schema cache/i.test(error.message || ''))) {
+        setMigrationMissing(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [gym.id]);
 
   const inputCls = 'w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 focus:outline-none focus:border-amber-500';
 
   async function updateGym(fields) {
     const { error: err } = await supabase.from('gyms').update(fields).eq('id', gym.id);
-    if (err) throw new Error('Could not save the music setting. Try again.');
+    if (err) {
+      if (err.code === 'PGRST204' || /music_|column|schema cache/i.test(err.message || '')) {
+        throw new Error('The music database update (migration 005) has not been run yet in Supabase — run the 005 file in the SQL Editor, then try again.');
+      }
+      throw new Error('Could not save the music setting. Try again.');
+    }
     if (fields.music_source !== undefined) setSource(fields.music_source);
     if (onGymUpdated) await onGymUpdated();
   }
@@ -213,20 +233,27 @@ export default function MusicPanel({ gym, user, onGymUpdated }) {
         </p>
       </div>
 
+      {migrationMissing && (
+        <p className="text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+          Music isn’t set up in the database yet — run migration 005 (the file Ian has) in Supabase → SQL Editor, then come back here. Nothing will save until then.
+        </p>
+      )}
+
       <div className="flex flex-wrap gap-2">
         {[
           { id: 'off', label: 'Off' },
           { id: 'radio', label: 'Internet radio' },
-          { id: 'spotify', label: 'Spotify' },
+          { id: 'spotify', label: 'Spotify (paused)', disabled: true },
         ].map((opt) => (
           <button
             key={opt.id}
+            disabled={opt.disabled}
             onClick={() => { if (opt.id === 'off') turnMusicOff(); else setSource(opt.id); }}
             className={`px-4 py-2 rounded-xl text-sm font-semibold border transition ${
               source === opt.id
                 ? 'bg-amber-500 text-slate-950 border-amber-500'
                 : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-amber-500/60'
-            }`}
+            } ${opt.disabled ? 'opacity-40 cursor-not-allowed hover:border-slate-800' : ''}`}
           >
             {opt.label}
           </button>
