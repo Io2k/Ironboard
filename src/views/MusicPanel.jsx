@@ -59,7 +59,7 @@ export default function MusicPanel({ gym, user, onGymUpdated }) {
   // Probe once: if the music columns aren't there, flag it.
   useEffect(() => {
     let cancelled = false;
-    supabase.from('gyms').select('music_source').eq('id', gym.id).maybeSingle().then(({ error }) => {
+    supabase.from('gyms').select('music_source, music_playing').eq('id', gym.id).maybeSingle().then(({ error }) => {
       if (!cancelled && error && (error.code === 'PGRST204' || /column|schema cache/i.test(error.message || ''))) {
         setMigrationMissing(true);
       }
@@ -73,7 +73,7 @@ export default function MusicPanel({ gym, user, onGymUpdated }) {
     const { error: err } = await supabase.from('gyms').update(fields).eq('id', gym.id);
     if (err) {
       if (err.code === 'PGRST204' || /music_|column|schema cache/i.test(err.message || '')) {
-        throw new Error('The music database update (migration 005) has not been run yet in Supabase — run the 005 file in the SQL Editor, then try again.');
+        throw new Error('A music database update has not been run yet in Supabase — run the latest music migration file (006) in the SQL Editor, then try again.');
       }
       throw new Error('Could not save the music setting. Try again.');
     }
@@ -100,8 +100,27 @@ export default function MusicPanel({ gym, user, onGymUpdated }) {
     setError('');
     setMessage('');
     try {
-      await updateGym({ music_source: 'off' });
+      await updateGym({ music_source: 'off', music_playing: false });
       setMessage('Music off — the ticker is gone from the board.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Start/stop lives here, not on the board: the board follows the
+  // music_playing flag (it re-reads the gym row every 30 seconds).
+  async function handleTogglePlaying() {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const wasPlaying = !!gym.music_playing;
+      await updateGym({ music_playing: !wasPlaying });
+      setMessage(wasPlaying
+        ? 'Music stopped on the board.'
+        : 'Music started — the board picks it up within about 30 seconds. If the board shows a sound hint, tap anywhere on the board once to unlock it.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -235,7 +254,7 @@ export default function MusicPanel({ gym, user, onGymUpdated }) {
 
       {migrationMissing && (
         <p className="text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
-          Music isn’t set up in the database yet — run migration 005 (the file Ian has) in Supabase → SQL Editor, then come back here. Nothing will save until then.
+          Music isn’t set up in the database yet — run the latest music migration file (006) in Supabase → SQL Editor, then come back here. Nothing will save until then.
         </p>
       )}
 
@@ -262,7 +281,22 @@ export default function MusicPanel({ gym, user, onGymUpdated }) {
 
       {source === 'radio' && (
         <div className="space-y-4">
-          <p className="text-sm text-slate-400">Free — no sign-in. The board plays the station in its browser; someone taps “Start music” on the gym screen once in the morning (browsers won’t autoplay sound on their own).</p>
+          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-bold text-slate-100">{gym.music_playing ? 'Playing now' : 'Music stopped'}</p>
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
+                {gym.music_station_url ? `Station: ${gym.music_station_name}` : 'Pick a station below first.'}
+              </p>
+            </div>
+            <button
+              onClick={handleTogglePlaying}
+              disabled={busy || migrationMissing || !gym.music_station_url}
+              className="shrink-0 px-5 py-3 rounded-xl font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition disabled:opacity-50 flex items-center gap-2"
+            >
+              {gym.music_playing ? <><Pause className="w-4 h-4" /> Stop music</> : <><Play className="w-4 h-4" /> Start music</>}
+            </button>
+          </div>
+          <p className="text-sm text-slate-400">Free — no sign-in. Starting and stopping happens here; the board follows within about 30 seconds.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {RADIO_PRESETS.map((st) => (
               <button

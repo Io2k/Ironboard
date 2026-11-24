@@ -28,6 +28,7 @@ export default function DisplayView({ code }) {
   const [nowPlaying, setNowPlaying] = useState(null);
   const [radioPlaying, setRadioPlaying] = useState(false);
   const [radioError, setRadioError] = useState('');
+  const [needsTap, setNeedsTap] = useState(false);
   const audioRef = useRef(null);
 
   useEffect(() => {
@@ -50,7 +51,7 @@ export default function DisplayView({ code }) {
         if (!g) return;
         setGym((prev) => {
           if (!prev) return g;
-          const keys = ['name', 'logo_url', 'primary_color', 'giveaway_enabled', 'giveaway_prize', 'music_source', 'music_station_name', 'music_station_url', 'music_spotify_playlist_id', 'music_spotify_playlist_name'];
+          const keys = ['name', 'logo_url', 'primary_color', 'giveaway_enabled', 'giveaway_prize', 'music_source', 'music_station_name', 'music_station_url', 'music_spotify_playlist_id', 'music_spotify_playlist_name', 'music_playing'];
           return keys.some((k) => prev[k] !== g[k]) ? g : prev;
         });
       }).catch(() => {});
@@ -125,27 +126,43 @@ export default function DisplayView({ code }) {
     return () => clearInterval(t);
   }, [loadNowPlaying]);
 
-  // Keep the radio stream in step with the station the owner picked. The
-  // audio element's own paused state tells us whether it was playing.
+  // The board follows the owner console's music_playing flag: start or stop
+  // the stream to match. Browsers only allow sound after someone has tapped
+  // on the page, so if play() is blocked we show a one-tap unlock hint and
+  // retry on the next tap anywhere on the board.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (gym?.music_source !== 'radio') { audio.pause(); setRadioPlaying(false); return; }
-    if (!audio.paused) { audio.load(); audio.play().catch(() => setRadioPlaying(false)); }
-  }, [gym?.music_source, gym?.music_station_url]);
-
-  async function toggleRadio() {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (radioPlaying) { audio.pause(); setRadioPlaying(false); return; }
-    setRadioError('');
-    try {
-      await audio.play();
-      setRadioPlaying(true);
-    } catch {
-      setRadioError('Tap again to start the music — the browser blocked autoplay.');
+    if (gym?.music_source !== 'radio' || !gym?.music_playing || !gym?.music_station_url) {
+      audio.pause();
+      setRadioPlaying(false);
+      setNeedsTap(false);
+      return;
     }
-  }
+    setRadioError('');
+    audio.load();
+    audio.play().then(() => {
+      setRadioPlaying(true);
+      setNeedsTap(false);
+    }).catch(() => {
+      setRadioPlaying(false);
+      setNeedsTap(true);
+    });
+  }, [gym?.music_source, gym?.music_station_url, gym?.music_playing]);
+
+  // One tap anywhere unlocks sound for this page; the console switch works
+  // from then on.
+  useEffect(() => {
+    if (!needsTap) return undefined;
+    const unlock = () => {
+      const audio = audioRef.current;
+      if (audio && gym?.music_source === 'radio' && gym?.music_playing) {
+        audio.play().then(() => { setRadioPlaying(true); setNeedsTap(false); }).catch(() => {});
+      }
+    };
+    document.addEventListener('click', unlock);
+    return () => document.removeEventListener('click', unlock);
+  }, [needsTap, gym?.music_source, gym?.music_playing]);
 
   function tickerText() {
     const fresh = nowPlaying?.updated_at && (Date.now() - new Date(nowPlaying.updated_at).getTime() < 90000);
@@ -337,17 +354,15 @@ export default function DisplayView({ code }) {
         <div className="border-t border-slate-800 bg-slate-900 px-4 py-3 flex items-center gap-3 overflow-hidden">
           {gym.music_source === 'radio' ? (
             <>
-              <button onClick={toggleRadio} className="shrink-0 flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-full text-sm transition">
-                {radioPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                {radioPlaying ? 'Pause music' : 'Start music'}
-              </button>
+              <Music2 className="w-4 h-4 text-amber-500 shrink-0" />
               <div className="flex-1 overflow-hidden whitespace-nowrap">
                 <div className="inline-block" style={{ animation: 'ironboard-ticker 20s linear infinite' }}>
-                  <span className="text-sm font-semibold text-amber-400">♪ LIVE — {gym.music_station_name || 'Radio'}&nbsp;&nbsp;&nbsp;</span>
-                  <span className="text-sm font-semibold text-amber-400">♪ LIVE — {gym.music_station_name || 'Radio'}&nbsp;&nbsp;&nbsp;</span>
+                  <span className="text-sm font-semibold text-amber-400">{radioPlaying ? `♪ LIVE — ${gym.music_station_name || 'Radio'}` : `♪ ${gym.music_station_name || 'Radio'} — music paused`}&nbsp;&nbsp;&nbsp;</span>
+                  <span className="text-sm font-semibold text-amber-400">{radioPlaying ? `♪ LIVE — ${gym.music_station_name || 'Radio'}` : `♪ ${gym.music_station_name || 'Radio'} — music paused`}&nbsp;&nbsp;&nbsp;</span>
                 </div>
               </div>
               {radioError && <span className="text-xs text-red-400 shrink-0">{radioError}</span>}
+              {needsTap && <span className="text-xs text-amber-400 shrink-0">Tap anywhere on this screen once to enable sound</span>}
               <audio
                 ref={audioRef}
                 src={gym.music_station_url || undefined}
