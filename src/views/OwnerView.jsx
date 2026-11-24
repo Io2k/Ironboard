@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import QRCode from 'qrcode';
-import { Building2, QrCode, Copy, Check, Dumbbell, LogOut, BarChart3, Gift, Megaphone } from 'lucide-react';
+import { Building2, QrCode, Copy, Check, Dumbbell, LogOut, BarChart3, Gift, Megaphone, Music2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { makeGymCode, joinUrl, displayUrl } from '../lib/gym';
 import GymStatsPanel from './GymStatsPanel';
 import GiveawayPanel from './GiveawayPanel';
+import MusicPanel from './MusicPanel';
 
 // Gym owner flow: create a gym, get its join code + QR poster link.
 export default function OwnerView({ user }) {
@@ -285,6 +286,13 @@ export default function OwnerView({ user }) {
                 <Gift className="w-5 h-5 text-amber-500" /> Monthly giveaway
               </h2>
               <GiveawayPanel gym={gym} user={user} onGymUpdated={loadGym} />
+            </section>
+
+            <section>
+              <h2 className="text-xl font-bold mb-3 flex items-center gap-2">
+                <Music2 className="w-5 h-5 text-amber-500" /> Music on the board
+              </h2>
+              <MusicPanel gym={gym} user={user} onGymUpdated={loadGym} />
             </section>
 
             <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">

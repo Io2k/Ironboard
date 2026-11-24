@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Dumbbell, Play, Pause, Gift, Trophy } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Dumbbell, Play, Pause, Gift, Trophy, Music2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getGymByCode } from '../lib/gym';
 import { monthKey } from '../lib/admin';
@@ -23,6 +23,12 @@ export default function DisplayView({ code }) {
   const [screenIdx, setScreenIdx] = useState(0);
   const [adIndex, setAdIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  // Music ticker (migration 005). Radio plays in this browser; Spotify's
+  // live track comes from the public music_now_playing snapshot.
+  const [nowPlaying, setNowPlaying] = useState(null);
+  const [radioPlaying, setRadioPlaying] = useState(false);
+  const [radioError, setRadioError] = useState('');
+  const audioRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,7 +50,7 @@ export default function DisplayView({ code }) {
         if (!g) return;
         setGym((prev) => {
           if (!prev) return g;
-          const keys = ['name', 'logo_url', 'primary_color', 'giveaway_enabled', 'giveaway_prize'];
+          const keys = ['name', 'logo_url', 'primary_color', 'giveaway_enabled', 'giveaway_prize', 'music_source', 'music_station_name', 'music_station_url', 'music_spotify_playlist_id', 'music_spotify_playlist_name'];
           return keys.some((k) => prev[k] !== g[k]) ? g : prev;
         });
       }).catch(() => {});
@@ -104,6 +110,52 @@ export default function DisplayView({ code }) {
     return () => clearInterval(t);
   }, [loadBoardExtras]);
 
+  // Spotify now-playing snapshot for the ticker. Errors are ignored on
+  // purpose: before migration 005 is run this table doesn't exist yet.
+  const loadNowPlaying = useCallback(async () => {
+    if (!gym || gym.music_source !== 'spotify') return;
+    const { data, error } = await supabase
+      .from('music_now_playing').select('*').eq('gym_id', gym.id).maybeSingle();
+    if (!error && data) setNowPlaying(data);
+  }, [gym]);
+
+  useEffect(() => {
+    loadNowPlaying();
+    const t = setInterval(loadNowPlaying, 15000);
+    return () => clearInterval(t);
+  }, [loadNowPlaying]);
+
+  // Keep the radio stream in step with the station the owner picked. The
+  // audio element's own paused state tells us whether it was playing.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (gym?.music_source !== 'radio') { audio.pause(); setRadioPlaying(false); return; }
+    if (!audio.paused) { audio.load(); audio.play().catch(() => setRadioPlaying(false)); }
+  }, [gym?.music_source, gym?.music_station_url]);
+
+  async function toggleRadio() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (radioPlaying) { audio.pause(); setRadioPlaying(false); return; }
+    setRadioError('');
+    try {
+      await audio.play();
+      setRadioPlaying(true);
+    } catch {
+      setRadioError('Tap again to start the music — the browser blocked autoplay.');
+    }
+  }
+
+  function tickerText() {
+    const fresh = nowPlaying?.updated_at && (Date.now() - new Date(nowPlaying.updated_at).getTime() < 90000);
+    if (fresh && nowPlaying.track_name) {
+      return `♪ ${nowPlaying.track_name}${nowPlaying.artist_name ? ` — ${nowPlaying.artist_name}` : ''}${nowPlaying.is_playing ? '' : ' (paused)'}`;
+    }
+    if (gym.music_spotify_playlist_name) return `♪ Spotify — ${gym.music_spotify_playlist_name}`;
+    return '♪ Spotify';
+  }
+
   const giveawayAd = gym?.giveaway_enabled
     ? {
         id: 'giveaway',
@@ -162,6 +214,7 @@ export default function DisplayView({ code }) {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      <style>{`@keyframes ironboard-ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }`}</style>
       <header className="border-b border-slate-800 bg-slate-900/80 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           {gym.logo_url ? (
@@ -279,6 +332,42 @@ export default function DisplayView({ code }) {
           </div>
         )}
       </main>
+
+      {gym.music_source && gym.music_source !== 'off' && (
+        <div className="border-t border-slate-800 bg-slate-900 px-4 py-3 flex items-center gap-3 overflow-hidden">
+          {gym.music_source === 'radio' ? (
+            <>
+              <button onClick={toggleRadio} className="shrink-0 flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-full text-sm transition">
+                {radioPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                {radioPlaying ? 'Pause music' : 'Start music'}
+              </button>
+              <div className="flex-1 overflow-hidden whitespace-nowrap">
+                <div className="inline-block" style={{ animation: 'ironboard-ticker 20s linear infinite' }}>
+                  <span className="text-sm font-semibold text-amber-400">♪ LIVE — {gym.music_station_name || 'Radio'}&nbsp;&nbsp;&nbsp;</span>
+                  <span className="text-sm font-semibold text-amber-400">♪ LIVE — {gym.music_station_name || 'Radio'}&nbsp;&nbsp;&nbsp;</span>
+                </div>
+              </div>
+              {radioError && <span className="text-xs text-red-400 shrink-0">{radioError}</span>}
+              <audio
+                ref={audioRef}
+                src={gym.music_station_url || undefined}
+                preload="none"
+                onError={() => setRadioError('That station could not be played — check the stream URL in the owner console.')}
+              />
+            </>
+          ) : (
+            <div className="flex-1 overflow-hidden whitespace-nowrap flex items-center gap-2">
+              <Music2 className="w-4 h-4 text-amber-500 shrink-0" />
+              <div className="overflow-hidden whitespace-nowrap flex-1">
+                <div className="inline-block" style={{ animation: 'ironboard-ticker 20s linear infinite' }}>
+                  <span className="text-sm font-semibold text-amber-400">{tickerText()}&nbsp;&nbsp;&nbsp;</span>
+                  <span className="text-sm font-semibold text-amber-400">{tickerText()}&nbsp;&nbsp;&nbsp;</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <footer className="border-t border-slate-800 px-6 py-3 flex items-center justify-between text-xs text-slate-400">
         <span>{gym.name} • IronBoard Kiosk</span>
